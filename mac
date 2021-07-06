@@ -4,35 +4,6 @@
 # Be prepared to turn your laptop (or desktop, no haters here)
 # into an awesome development machine.
 
-fancy_echo() {
-  local fmt="$1"; shift
-
-  # shellcheck disable=SC2059
-  printf "\\n$fmt\\n" "$@"
-}
-
-append_to_zshrc() {
-  local text="$1" zshrc
-  local skip_new_line="${2:-0}"
-
-  if [ -w "$HOME/.zshrc.local" ]; then
-    zshrc="$HOME/.zshrc.local"
-  else
-    zshrc="$HOME/.zshrc"
-  fi
-
-  if ! grep -Fqs "$text" "$zshrc"; then
-    if [ "$skip_new_line" -eq 1 ]; then
-      printf "%s\\n" "$text" >> "$zshrc"
-    else
-      printf "\\n%s\\n" "$text" >> "$zshrc"
-    fi
-  fi
-}
-
-# shellcheck disable=SC2154
-trap 'ret=$?; test $ret -ne 0 && printf "failed\n\n" >&2; exit $ret' EXIT
-
 set -eux
 
 if [ ! -d "$HOME/.bin/" ]; then
@@ -42,11 +13,6 @@ fi
 if [ ! -f "$HOME/.zshrc" ]; then
   touch "$HOME/.zshrc"
 fi
-
-# shellcheck disable=SC2016
-append_to_zshrc 'export PATH="$HOME/.bin:$PATH"'
-
-set -eux
 
 # arm64 or x86_64
 arch="$(uname -m)"
@@ -67,12 +33,11 @@ fi
 
 export PATH="$BREW/bin:$PATH"
 
-gem_install_or_update() {
-  if gem list "$1" --installed > /dev/null; then
-    gem update "$@"
-  else
-    gem install "$@"
-  fi
+fancy_echo() {
+  local fmt="$1"; shift
+
+  # shellcheck disable=SC2059
+  printf "\\n$fmt\\n" "$@"
 }
 
 if brew list | grep -Fq brew-cask; then
@@ -124,6 +89,24 @@ EOF
 fancy_echo "Update heroku binary ..."
 brew unlink heroku
 brew link --force heroku
+append_to_zshrc() {
+  local text="$1" zshrc
+  local skip_new_line="${2:-0}"
+
+  if [ -w "$HOME/.zshrc.local" ]; then
+    zshrc="$HOME/.zshrc.local"
+  else
+    zshrc="$HOME/.zshrc"
+  fi
+
+  if ! grep -Fqs "$text" "$zshrc"; then
+    if [ "$skip_new_line" -eq 1 ]; then
+      printf "%s\\n" "$text" >> "$zshrc"
+    else
+      printf "\\n%s\\n" "$text" >> "$zshrc"
+    fi
+  fi
+}
 
 # zsh
 update_shell() {
@@ -150,49 +133,47 @@ case "$SHELL" in
     ;;
 esac
 
-fancy_echo "Configuring asdf version manager ..."
-if [ ! -d "$HOME/.asdf" ]; then
-  git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch v0.5.0
-  append_to_zshrc "source $HOME/.asdf/asdf.sh" 1
-fi
-
-alias install_asdf_plugin=add_or_update_asdf_plugin
-add_or_update_asdf_plugin() {
-  local name="$1"
-  local url="$2"
-
-  if ! asdf plugin-list | grep -Fq "$name"; then
-    asdf plugin-add "$name" "$url"
+gem_install_or_update() {
+  if gem list "$1" --installed > /dev/null; then
+    gem update "$@"
   else
-    asdf plugin-update "$name"
+    gem install "$@"
   fi
 }
 
-# shellcheck disable=SC1090
-source "$HOME/.asdf/asdf.sh"
-add_or_update_asdf_plugin "ruby" "https://github.com/asdf-vm/asdf-ruby.git"
-add_or_update_asdf_plugin "nodejs" "https://github.com/asdf-vm/asdf-nodejs.git"
+heroku plugins:install heroku-pg-extras
 
-install_asdf_language() {
-  local language="$1"
-  local version
-  version="$(asdf list-all "$language" | grep -v "[a-z]" | tail -1)"
+fancy_echo "Configuring asdf version manager ..."
+# ASDF
+if [ -d "$HOME/.asdf" ]; then
+  (
+    cd "$HOME/.asdf"
+    git fetch origin
+    git reset --hard origin/master
+  )
+else
+  gh repo clone asdf-vm/asdf "$HOME/.asdf"
+fi
+PATH="$HOME/.asdf/bin:$PATH"
+PATH="$HOME/.asdf/shims:$PATH"
+export PATH
 
-  if ! asdf list "$language" | grep -Fq "$version"; then
-    asdf install "$language" "$version"
-    asdf global "$language" "$version"
-  fi
-}
+# Ruby
+if ! asdf plugin-list | grep -Fq "ruby"; then
+  asdf plugin-add "ruby" "https://github.com/asdf-vm/asdf-ruby"
+fi
+asdf plugin-update "ruby"
+asdf install ruby 2.7.2
+asdf install ruby 3.0.1
 
-fancy_echo "Installing latest Ruby ..."
-install_asdf_language "ruby"
-gem update --system
-number_of_cores=$(sysctl -n hw.ncpu)
-bundle config --global jobs $((number_of_cores - 1))
-
-fancy_echo "Installing latest Node ..."
-bash "$HOME/.asdf/plugins/nodejs/bin/import-release-team-keyring"
-install_asdf_language "nodejs"
+# Vim
+if [ -e "$HOME/.vim/autoload/plug.vim" ]; then
+  vim -u "$HOME/.vimrc" +PlugUpgrade +qa
+else
+  curl -fLo "$HOME/.vim/autoload/plug.vim" --create-dirs \
+    https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+fi
+vim -u "$HOME/.vimrc" +PlugUpdate +PlugClean! +qa
 
 if [ -f "$HOME/.laptop.local" ]; then
   fancy_echo "Running your customizations from ~/.laptop.local ..."
