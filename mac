@@ -33,7 +33,7 @@ append_to_zshrc() {
 # shellcheck disable=SC2154
 trap 'ret=$?; test $ret -ne 0 && printf "failed\n\n" >&2; exit $ret' EXIT
 
-set -e
+set -eux
 
 if [ ! -d "$HOME/.bin/" ]; then
   mkdir "$HOME/.bin"
@@ -46,33 +46,44 @@ fi
 # shellcheck disable=SC2016
 append_to_zshrc 'export PATH="$HOME/.bin:$PATH"'
 
-HOMEBREW_PREFIX="/usr/local"
+set -eux
 
-if [ -d "$HOMEBREW_PREFIX" ]; then
-  if ! [ -r "$HOMEBREW_PREFIX" ]; then
-    sudo chown -R "$LOGNAME:admin" /usr/local
-  fi
+# arm64 or x86_64
+arch="$(uname -m)"
+
+# Homebrew
+if [ "$arch" = "arm64" ]; then
+  BREW="/opt/homebrew"
 else
-  sudo mkdir "$HOMEBREW_PREFIX"
-  sudo chflags norestricted "$HOMEBREW_PREFIX"
-  sudo chown -R "$LOGNAME:admin" "$HOMEBREW_PREFIX"
+  BREW="/usr/local"
 fi
 
-update_shell() {
-  local shell_path;
-  shell_path="$(command -v zsh)"
+if [ ! -d "$BREW" ]; then
+  sudo mkdir -p "$BREW"
+  sudo chflags norestricted "$BREW"
+  sudo chown -R "$LOGNAME:admin" "$BREW"
+  curl -L https://github.com/Homebrew/brew/tarball/master | tar xz --strip 1 -C "$BREW"
+fi
 
-  fancy_echo "Changing your shell to zsh ..."
-  if ! grep "$shell_path" /etc/shells > /dev/null 2>&1 ; then
-    fancy_echo "Adding '$shell_path' to /etc/shells"
-    sudo sh -c "echo $shell_path >> /etc/shells"
+export PATH="$BREW/bin:$PATH"
+
+# zsh
+update_shell() {
+  sudo chown -R $(whoami) "$BREW/share/zsh" "$BREW/share/zsh/site-functions"
+  chmod u+w "$BREW/share/zsh" "$BREW/share/zsh/site-functions"
+  shellpath="$(command -v zsh)"
+
+  if ! grep "$shellpath" /etc/shells > /dev/null 2>&1 ; then
+    sudo sh -c "echo $shellpath >> /etc/shells"
   fi
-  sudo chsh -s "$shell_path" "$USER"
+
+  chsh -s "$shellpath"
 }
+
 
 case "$SHELL" in
   */zsh)
-    if [ "$(command -v zsh)" != '/usr/local/bin/zsh' ] ; then
+    if [ "$(command -v zsh)" != "$BREW/bin/zsh" ] ; then
       update_shell
     fi
     ;;
@@ -88,19 +99,6 @@ gem_install_or_update() {
     gem install "$@"
   fi
 }
-
-if ! command -v brew >/dev/null; then
-  fancy_echo "Installing Homebrew ..."
-    /bin/bash -c \
-      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
-
-    append_to_zshrc '# recommended by brew doctor'
-
-    # shellcheck disable=SC2016
-    append_to_zshrc 'export PATH="/usr/local/bin:$PATH"' 1
-
-    export PATH="/usr/local/bin:$PATH"
-fi
 
 if brew list | grep -Fq brew-cask; then
   fancy_echo "Uninstalling old Homebrew-Cask ..."
